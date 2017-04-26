@@ -1,21 +1,28 @@
 
 'use strict';
-
 import * as path from 'path';
-import { workspace, extensions, ExtensionContext, window, StatusBarAlignment, commands, ViewColumn, Uri, CancellationToken, TextDocumentContentProvider, TextEditor, WorkspaceConfiguration, languages, IndentAction, ProgressLocation, Progress } from 'vscode';
+import { workspace, extensions, ExtensionContext, window, StatusBarAlignment, commands, ViewColumn, Uri, CancellationToken, TextDocumentContentProvider, TextEditor, WorkspaceConfiguration, languages, IndentAction, ProgressLocation, Progress, env, version } from 'vscode';
 import { ExecuteCommandParams, ExecuteCommandRequest, LanguageClient, LanguageClientOptions, RevealOutputChannelOn, ServerOptions, Position as LSPosition, Location as LSLocation } from 'vscode-languageclient';
-import { collectionJavaExtensions } from './plugin'
+import { collectionJavaExtensions, collectJavaExtensionContributors } from './plugin'
 import { prepareExecutable, awaitServerConnection } from './javaServerStarter';
 import * as requirements from './requirements';
 import { Commands } from './commands';
 import { StatusNotification, ClassFileContentsRequest, ProjectConfigurationUpdateRequest, MessageType, ActionableNotification, FeatureStatus, ActionableMessage } from './protocol';
-
+const pathExists = require('path-exists');
+const fs = require('fs');
 let os = require('os');
+const publicIp = require('public-ip');
+
+let Analytics = require('analytics-node');
 let oldConfig;
 let lastStatus;
+let analytics;
+let telemetryEventQueue;
+let optinRequested;
+let cachedIp;
 
 export function activate(context: ExtensionContext) {
-
+	openTelemetryOptInDialog(context.extensionPath);
 	enableJavadocSymbols();
 
 	return requirements.resolveRequirements().catch(error => {
@@ -71,10 +78,23 @@ export function activate(context: ExtensionContext) {
 					// used during development
 					serverOptions = awaitServerConnection.bind(null, port);
 				}
-
+				let writeKey = getSegmentWriteKey(context);
+				if (writeKey) {
+					analytics = new Analytics(writeKey, { flushAt: 1 });
+					report(startupEvent());
+				}
 				// Create the language client and start the client.
 				let languageClient = new LanguageClient('java', 'Language Support for Java', serverOptions, clientOptions);
 				languageClient.onReady().then(() => {
+					languageClient.onTelemetry(e => {
+						if (analytics) {
+							if (isTelemetryOptIn()) {
+								report(e);
+							} else if (telemetryEventQueue) {//waiting for optin response
+								telemetryEventQueue.push(e);
+							}
+						}
+					});
 					languageClient.onNotification(StatusNotification.type, (report) => {
 						switch (report.type) {
 							case 'Started':
@@ -192,7 +212,6 @@ export function activate(context: ExtensionContext) {
 				context.subscriptions.push(onConfigurationChange());
 				toggleItem(window.activeTextEditor, item);
 			});
-
 		});
 	});
 }
@@ -252,6 +271,20 @@ function setIncompleteClasspathSeverity(severity: string) {
 		() => console.log(section + ' globally set to ' + severity),
 		(error) => console.log(error)
 	);
+}
+
+function setTelemetryOptIn(optin: boolean) {
+	const config = getJavaConfiguration();
+	const section = 'telemetry.enabled';
+	config.update(section, optin, true).then(
+		() => console.log(section + ' globally set to ' + optin),
+		(error) => console.log(error)
+	);
+}
+
+
+function isTelemetryOptIn(): boolean {
+	return getJavaConfiguration().get('telemetry.enabled', false)
 }
 
 function projectConfigurationUpdate(languageClient: LanguageClient, uri?: Uri) {
@@ -363,4 +396,107 @@ function openServerLogFile(workspacePath): Thenable<boolean> {
 			}
 			return didOpen;
 		});
+}
+
+function openTelemetryOptInDialog(extensionPath) {
+	//check if user has already been asked to opt-in.
+	//He will be asked every time a new extension is installed
+	let optinFile = path.resolve(extensionPath, 'optinrequested');
+	optinRequested = pathExists.sync(optinFile);
+	if (!optinRequested) {
+		telemetryEventQueue = [];//create event queue until user makes a decision
+		window.showInformationMessage('Java extension would like to report some usage data', 'More Information', 'Accept', 'Deny').then((selection) => {
+			if (selection === 'undefined') {
+				//close was chosen. Ask next time.
+				return;
+			}
+			if (selection === 'More Information') {
+				//open wiki page
+				openWebPage('https://github.com/redhat-developer/vscode-java/wiki/Usage-reporting');
+				//reopen dialog immediately
+				openTelemetryOptInDialog(extensionPath);
+				return;
+			}
+			const optIn = selection === 'Accept';
+			setTelemetryOptIn(optIn);//store decision in global preferences
+			fs.open(optinFile, 'w', (err, fd) => {
+				if (fd) {
+					fs.close(fd);
+				}
+			});
+			if (optIn && telemetryEventQueue) {
+				//report all events that were waiting for opt-in
+				telemetryEventQueue.forEach(e => {
+					report(e);
+				});
+				//discard queue
+				telemetryEventQueue = null;
+			}
+		});
+	}
+}
+function report(e) {
+	if (analytics) {
+		console.log('Tracking '+e.name);
+		getIp().then(ip => {
+			analytics.track({
+				anonymousId: env.machineId || 'vscode.developer',
+				event: e.name,
+				//timestamp: (e.timestamp)?new Date(e.timestamp).t:null,
+				properties: (e.properties) ? e.properties : e.measures,
+				context: { ip: ip }
+			}, function (err, batch) {
+				if (err) {// There was an error flushing data...
+					console.log(err);
+				} else if (batch) {
+					console.log(batch);
+				}
+			});
+		});
+	}
+}
+
+function startupEvent() {
+	return {
+		name: 'vscode.java.startup',
+		properties: {
+			version: '0.13.0',
+			vscode: version,
+			os:os.platform(),
+			extensions: collectJavaExtensionContributors(extensions.all)
+		}
+	}
+}
+
+function getIp():Thenable<string> {
+	if (cachedIp) {
+		return new Promise((resolve, reject) => {
+			resolve(cachedIp);
+		});
+	}
+	return publicIp.v4({https:true}).then(publicIp => {
+		console.log('Public IP address is '+publicIp);
+		cachedIp = publicIp;
+		return new Promise((resolve, reject) => {
+			resolve(cachedIp);
+		})
+		.catch(err => {
+			return new Promise((resolve, reject) => {
+				console.log('Failed to determine public IP: '+err.message);
+				resolve('127.0.0.1');
+			});
+		})
+	});
+}
+
+function getSegmentWriteKey(context: ExtensionContext): String {
+	let extensionPackage = require(context.asAbsolutePath('./package.json'));
+	if (extensionPackage) {
+		return extensionPackage.segmentWriteKey
+	}
+	return null;
+}
+
+function openWebPage(url: string) {
+	commands.executeCommand(Commands.OPEN_BROWSER, Uri.parse(url));
 }

@@ -6,6 +6,7 @@
   "icon": "icons/icon128.png",
   "license": "EPL-1.0",
   "version": "0.13.0",
+  "segmentWriteKey": "MXM7iv13sVaCGqOhnQEGLZxhfy6hecYh",
   "publisher": "redhat",
   "bugs": "https://github.com/redhat-developer/vscode-java/issues",
   "preview": true,
@@ -137,6 +138,11 @@
           "type": "string",
           "description": "Preferred content provider (a 3rd party decompiler id, usually)",
           "default": null
+        },
+        "java.telemetry.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable usage data to be sent to Red Hat"
         }
       }
     },
@@ -184,11 +190,13 @@
     "gulp-download": "0.0.1"
   },
   "dependencies": {
-    "vscode-languageclient": "^3.2.0",
-    "find-java-home": "0.1.4",
-    "tmp": "^0.0.31",
-    "path-exists": "^3.0.0",
+    "analytics-node": "^3.1.1",
     "expand-home-dir": "^0.0.3",
-    "glob": "^7.1.1"
+    "find-java-home": "0.1.4",
+    "glob": "^7.1.1",
+    "path-exists": "^3.0.0",
+    "public-ip": "^2.3.5",
+    "tmp": "^0.0.31",
+    "vscode-languageclient": "^3.2.0"
   }
 }
