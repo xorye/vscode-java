@@ -23,6 +23,7 @@ import { getJavaConfiguration } from './utils';
 import { onConfigurationChange, excludeProjectSettingsFiles } from './settings';
 import { logger, initializeLogFile } from './log';
 import glob = require('glob');
+import { LanguageClientRegistry, registry } from './LanguageClientRegistry';
 
 let lastStatus;
 let languageClient: LanguageClient;
@@ -111,6 +112,10 @@ class OutputInfoCollector implements OutputChannel {
 }
 
 export function activate(context: ExtensionContext): Promise<ExtensionAPI> {
+
+	LanguageClientRegistry.bindRequest('redhat.java', 'redhat.vscode-quarkus', 'quarkusTools/quarkusPropertiesChanged').then(() => {
+		window.showInformationMessage(`Sucessfully binded quarkusTools/quarkusPropertiesChanged from redhat.java client to redhat.vscode-quarkus client.`);
+	});
 
 	let storagePath = context.storagePath;
 	if (!storagePath) {
@@ -208,6 +213,10 @@ export function activate(context: ExtensionContext): Promise<ExtensionAPI> {
 				const registerHoverCommand = hoverAction.registerClientHoverProvider(languageClient, context);
 
 				languageClient.onReady().then(() => {
+
+					LanguageClientRegistry.register('redhat.java', languageClient);
+					window.showInformationMessage('redhat.java languageClient registered to LanguageClientRegistry.');
+
 					languageClient.onNotification(StatusNotification.type, (report) => {
 						switch (report.type) {
 							case 'Started':
@@ -220,6 +229,7 @@ export function activate(context: ExtensionContext): Promise<ExtensionAPI> {
 									javaRequirement: requirements,
 									status: report.type,
 									registerHoverCommand,
+									languageClientRegistry: LanguageClientRegistry
 								});
 								break;
 							case 'Error':
@@ -227,11 +237,13 @@ export function activate(context: ExtensionContext): Promise<ExtensionAPI> {
 								lastStatus = item.text;
 								p.report({ message: 'Finished with Error' });
 								toggleItem(window.activeTextEditor, item);
+
 								resolve({
 									apiVersion: '0.2',
 									javaRequirement: requirements,
 									status: report.type,
 									registerHoverCommand,
+									languageClientRegistry: LanguageClientRegistry
 								});
 								break;
 							case 'Starting':
