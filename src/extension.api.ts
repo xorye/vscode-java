@@ -10,4 +10,5 @@ export interface ExtensionAPI {
 	readonly javaRequirement: RequirementsData;
 	readonly status: "Started" | "Error";
 	readonly registerHoverCommand: registerHoverCommand;
+	languageClient: any;
 }

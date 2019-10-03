@@ -3,7 +3,7 @@
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { workspace, extensions, ExtensionContext, window, StatusBarAlignment, commands, ViewColumn, Uri, CancellationToken, TextDocumentContentProvider, TextEditor, WorkspaceConfiguration, languages, IndentAction, ProgressLocation, InputBoxOptions, Selection, Position, EventEmitter, OutputChannel } from 'vscode';
+import { workspace, extensions, Extension, ExtensionContext, window, StatusBarAlignment, commands, ViewColumn, Uri, CancellationToken, TextDocumentContentProvider, TextEditor, WorkspaceConfiguration, languages, IndentAction, ProgressLocation, InputBoxOptions, Selection, Position, EventEmitter, OutputChannel } from 'vscode';
 import { ExecuteCommandParams, ExecuteCommandRequest, LanguageClient, LanguageClientOptions, RevealOutputChannelOn, Position as LSPosition, Location as LSLocation, StreamInfo, VersionedTextDocumentIdentifier, ErrorHandler, Message, ErrorAction, CloseAction, InitializationFailedHandler } from 'vscode-languageclient';
 import { onExtensionChange, collectJavaExtensions } from './plugin';
 import { prepareExecutable, awaitServerConnection } from './javaServerStarter';
@@ -108,6 +108,20 @@ class OutputInfoCollector implements OutputChannel {
 	dispose(): void {
 		this.channel.dispose();
 	}
+}
+
+/**
+ * Tries to get vscode-quarkus' language client.
+ * If vscode-quarkus is not running, or if vscode-quarkus' language client
+ * and the quarkus language server failed to connect, this function will return
+ * undefined.
+ */
+function getQuarkusLanguageClientIfExists(): LanguageClient | undefined {
+	const vscodeQuarkus: Extension<any> | undefined = extensions.getExtension('redhat.vscode-quarkus');
+	if (!vscodeQuarkus || !vscodeQuarkus.isActive) {
+		return;
+	}
+	return vscodeQuarkus.exports.languageClient as LanguageClient;
 }
 
 export function activate(context: ExtensionContext): Promise<ExtensionAPI> {
@@ -220,6 +234,7 @@ export function activate(context: ExtensionContext): Promise<ExtensionAPI> {
 									javaRequirement: requirements,
 									status: report.type,
 									registerHoverCommand,
+									languageClient
 								});
 								break;
 							case 'Error':
@@ -227,11 +242,13 @@ export function activate(context: ExtensionContext): Promise<ExtensionAPI> {
 								lastStatus = item.text;
 								p.report({ message: 'Finished with Error' });
 								toggleItem(window.activeTextEditor, item);
+								console.log("VSCODE-JAVA LS ABOUT TO RESOLVE 'ERROR'");
 								resolve({
 									apiVersion: '0.2',
 									javaRequirement: requirements,
 									status: report.type,
 									registerHoverCommand,
+									languageClient
 								});
 								break;
 							case 'Starting':
@@ -317,6 +334,25 @@ export function activate(context: ExtensionContext): Promise<ExtensionAPI> {
 							arguments: rest
 						};
 						return languageClient.sendRequest(ExecuteCommandRequest.type, params);
+					}));
+
+					context.subscriptions.push(commands.registerCommand('java.test', async (obj) => {
+						// to execute the following code, call the "Java: Send request to Quarkus language client" command
+
+						// the following code will get quarkus language client and send a
+						// request to quarkus language server
+						const languageClient: LanguageClient|undefined = getQuarkusLanguageClientIfExists();
+						if (languageClient) {
+							const command = await window.showInputBox({
+								prompt: 'Type a command for sendRequest() for Quarkus language client',
+								value: 'textDocument/completion'
+							});
+							if (command) {
+								languageClient.sendRequest(command);
+							}
+						} else {
+							window.showInformationMessage('Cannot find Quarkus language client. This could be because vscode-quarkus did not activate yet, or the Quarkus language server failed to connect');
+						}
 					}));
 
 					context.subscriptions.push(commands.registerCommand(Commands.COMPILE_WORKSPACE, (isFullCompile: boolean) => {
