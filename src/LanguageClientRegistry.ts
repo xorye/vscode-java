@@ -1,5 +1,5 @@
 import { window } from 'vscode';
-import { LanguageClient } from 'vscode-languageclient';
+import { LanguageClient, NotificationType } from 'vscode-languageclient';
 
 interface Registry {
   [extensionId: string]: LanguageClient;
@@ -10,8 +10,15 @@ interface PendingBind {
   toExtensionId: string;
   fromExtensionRegistered: boolean;
   toExtensionRegistered: boolean;
-  request: string;
+  request?: string;
+  notification?: string;
+  bindType: BindType;
   resolve: (value?: unknown) => void;
+}
+
+enum BindType {
+  Request,
+  Notification
 }
 
 const registry: Registry = {};
@@ -19,18 +26,7 @@ export { registry };
 
 const pendingBinds: PendingBind[] = [];
 
-const handler = {
-  set: (registry, extensionId, value, receiver) => {
-    registry[extensionId] = value;
-
-    updatePendingRequests(extensionId);
-    resolvePendingRequestsIfPossible();
-
-    return true;
-  }
-};
-
-function updatePendingRequests(extensionId: string): void {
+function updatePendingBinds(extensionId: string): void {
   pendingBinds.forEach((request: PendingBind) => {
     if (request.fromExtensionId === extensionId) {
       request.fromExtensionRegistered = true;
@@ -42,17 +38,30 @@ function updatePendingRequests(extensionId: string): void {
   });
 }
 
-function resolvePendingRequestsIfPossible(): void {
-  pendingBinds.forEach((request: PendingBind, index: number, object: PendingBind[]) => {
-    if (request.fromExtensionRegistered && request.toExtensionRegistered) {
-      LanguageClientRegistry.bindRequestSync(request.fromExtensionId, request.toExtensionId, request.request);
-      request.resolve();
+function resolvePendingBindsIfPossible(): void {
+  pendingBinds.forEach((pendingBind: PendingBind, index: number, object: PendingBind[]) => {
+    if (pendingBind.fromExtensionRegistered && pendingBind.toExtensionRegistered) {
+
+      switch (pendingBind.bindType) {
+        case BindType.Request: {
+          LanguageClientRegistry.bindRequestSync(pendingBind.fromExtensionId, pendingBind.toExtensionId, pendingBind.request);
+          break;
+        }
+        case BindType.Notification: {
+          LanguageClientRegistry.bindNotificationSync(pendingBind.fromExtensionId, pendingBind.toExtensionId, pendingBind.notification);
+          break;
+        }
+        default: {
+          // should never happen
+          break;
+        }
+      }
+
+      pendingBind.resolve();
       object.splice(index, 1);
     }
   });
 }
-
-const registryProxy = new Proxy(registry, handler);
 
 export class LanguageClientRegistry {
 
@@ -62,7 +71,9 @@ export class LanguageClientRegistry {
    * @param languageClient
    */
   static register(extensionId: string, languageClient: LanguageClient): void {
-    registryProxy[extensionId] = languageClient;
+    registry[extensionId] = languageClient;
+    updatePendingBinds(extensionId);
+    resolvePendingBindsIfPossible();
   }
 
   /**
@@ -81,20 +92,21 @@ export class LanguageClientRegistry {
    */
   static bindRequest(fromExtensionId: string, toExtensionId: string, request: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      if (registryProxy.hasOwnProperty(toExtensionId) && registryProxy.hasOwnProperty(fromExtensionId)) {
+      if (registry.hasOwnProperty(toExtensionId) && registry.hasOwnProperty(fromExtensionId)) {
         LanguageClientRegistry.bindRequestSync(fromExtensionId, toExtensionId, request);
         resolve();
       } else {
 
-        const pendingRequest = {
+        const pendingBind = {
           fromExtensionId,
           toExtensionId,
-          fromExtensionRegistered: registryProxy.hasOwnProperty(fromExtensionId) as boolean,
-          toExtensionRegistered: registryProxy.hasOwnProperty(toExtensionId) as boolean,
+          fromExtensionRegistered: registry.hasOwnProperty(fromExtensionId) as boolean,
+          toExtensionRegistered: registry.hasOwnProperty(toExtensionId) as boolean,
           request,
+          bindType: BindType.Request,
           resolve
         };
-        pendingBinds.push(pendingRequest);
+        pendingBinds.push(pendingBind);
       }
     });
   }
@@ -109,11 +121,41 @@ export class LanguageClientRegistry {
    * @param request
    */
   static bindRequestSync(fromExtensionId: string, toExtensionId: string, request: string): void {
-    const fromLanguageClient: LanguageClient = registryProxy[fromExtensionId];
-    const toLanguageClient: LanguageClient = registryProxy[toExtensionId];
+    const fromLanguageClient: LanguageClient = registry[fromExtensionId];
+    const toLanguageClient: LanguageClient = registry[toExtensionId];
     fromLanguageClient.onRequest(request, async(params: any) => {
       window.showInformationMessage(`Delegating ${request} request from ${fromExtensionId} to ${toExtensionId}.` );
       return <any> await toLanguageClient.sendRequest(request, params);
+    });
+  }
+
+  static bindNotification(fromExtensionId: string, toExtensionId: string, notification: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (registry.hasOwnProperty(toExtensionId) && registry.hasOwnProperty(fromExtensionId)) {
+        LanguageClientRegistry.bindNotificationSync(fromExtensionId, toExtensionId, notification);
+        resolve();
+      } else {
+
+        const pendingBind = {
+          fromExtensionId,
+          toExtensionId,
+          fromExtensionRegistered: registry.hasOwnProperty(fromExtensionId) as boolean,
+          toExtensionRegistered: registry.hasOwnProperty(toExtensionId) as boolean,
+          notification,
+          bindType: BindType.Notification,
+          resolve
+        };
+        pendingBinds.push(pendingBind);
+      }
+    });
+  }
+
+  static bindNotificationSync(fromExtensionId: string, toExtensionId: string, notification: string): void {
+    const fromLanguageClient: LanguageClient = registry[fromExtensionId];
+    const toLanguageClient: LanguageClient = registry[toExtensionId];
+    fromLanguageClient.onNotification(notification, async(params: any) => {
+      window.showInformationMessage(`Delegating ${notification} notification from ${fromExtensionId} to ${toExtensionId}.` );
+      return <any> await toLanguageClient.sendNotification(notification, params);
     });
   }
 }
