@@ -124,7 +124,6 @@ export class LanguageClientRegistry {
     const fromLanguageClient: LanguageClient = registry[fromExtensionId];
     const toLanguageClient: LanguageClient = registry[toExtensionId];
     fromLanguageClient.onRequest(request, async(params: any) => {
-      window.showInformationMessage(`Delegating ${request} request from ${fromExtensionId} to ${toExtensionId}.` );
       return <any> await toLanguageClient.sendRequest(request, params);
     });
   }
@@ -154,7 +153,6 @@ export class LanguageClientRegistry {
     const fromLanguageClient: LanguageClient = registry[fromExtensionId];
     const toLanguageClient: LanguageClient = registry[toExtensionId];
     fromLanguageClient.onNotification(notification, async(params: any) => {
-      window.showInformationMessage(`Delegating ${notification} notification from ${fromExtensionId} to ${toExtensionId}.` );
       return <any> await toLanguageClient.sendNotification(notification, params);
     });
   }

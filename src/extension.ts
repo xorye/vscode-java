@@ -114,7 +114,6 @@ class OutputInfoCollector implements OutputChannel {
 export function activate(context: ExtensionContext): Promise<ExtensionAPI> {
 
 	LanguageClientRegistry.bindRequest('redhat.java', 'redhat.vscode-quarkus', 'quarkusTools/quarkusPropertiesChanged').then(() => {
-		window.showInformationMessage(`Sucessfully binded quarkusTools/quarkusPropertiesChanged from redhat.java client to redhat.vscode-quarkus client.`);
 	});
 
 	let storagePath = context.storagePath;
@@ -215,7 +214,6 @@ export function activate(context: ExtensionContext): Promise<ExtensionAPI> {
 				languageClient.onReady().then(() => {
 
 					LanguageClientRegistry.register('redhat.java', languageClient);
-					window.showInformationMessage('redhat.java languageClient registered to LanguageClientRegistry.');
 
 					languageClient.onNotification(StatusNotification.type, (report) => {
 						switch (report.type) {
