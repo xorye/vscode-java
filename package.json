@@ -32,6 +32,7 @@
     "workspaceContains:build.gradle",
     "workspaceContains:.classpath"
   ],
+  "extensionDependencies": ["publisher.vscode-telemetry"],
   "main": "./dist/extension",
   "contributes": {
     "languages": [

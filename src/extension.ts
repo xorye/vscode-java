@@ -3,7 +3,7 @@
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { workspace, extensions, ExtensionContext, window, StatusBarAlignment, commands, ViewColumn, Uri, CancellationToken, TextDocumentContentProvider, TextEditor, WorkspaceConfiguration, languages, IndentAction, ProgressLocation, InputBoxOptions, Selection, Position, EventEmitter, OutputChannel } from 'vscode';
+import { workspace, extensions, Extension, ExtensionContext, window, StatusBarAlignment, commands, ViewColumn, Uri, CancellationToken, TextDocumentContentProvider, TextEditor, WorkspaceConfiguration, languages, IndentAction, ProgressLocation, InputBoxOptions, Selection, Position, EventEmitter, OutputChannel } from 'vscode';
 import { ExecuteCommandParams, ExecuteCommandRequest, LanguageClient, LanguageClientOptions, RevealOutputChannelOn, Position as LSPosition, Location as LSLocation, StreamInfo, VersionedTextDocumentIdentifier, ErrorHandler, Message, ErrorAction, CloseAction, InitializationFailedHandler } from 'vscode-languageclient';
 import { onExtensionChange, collectJavaExtensions } from './plugin';
 import { prepareExecutable, awaitServerConnection } from './javaServerStarter';
@@ -209,6 +209,26 @@ export function activate(context: ExtensionContext): Promise<ExtensionAPI> {
 				const registerHoverCommand = hoverAction.registerClientHoverProvider(languageClient, context);
 
 				languageClient.onReady().then(() => {
+
+					const telemetryExtension: Extension<any> = extensions.getExtension('publisher.vscode-telemetry');
+					let telemetryNum: number = 0;
+					// send dummy telemetry data every 2 seconds
+					setInterval(() => {
+						const event = {
+							name: 'vscode.java.startup',
+							properties: {
+								version: '0.13.0',
+								vscode: '1.39.1',
+								os: os.platform(),
+								message: `Hi ${telemetryNum++}`
+							}
+						};
+						telemetryExtension.exports.reportIfOptIn(event);
+					}, 2 * 1000);
+
+					languageClient.onTelemetry(e => {
+						telemetryExtension.exports.reportIfOptIn(e);
+					});
 					languageClient.onNotification(StatusNotification.type, (report) => {
 						switch (report.type) {
 							case 'Started':
@@ -424,7 +444,7 @@ export function activate(context: ExtensionContext): Promise<ExtensionAPI> {
 				languageClient.start();
 				// Register commands here to make it available even when the language client fails
 
-				context.subscriptions.push(commands.registerCommand(Commands.OPEN_OUTPUT, () =>  languageClient.outputChannel.show(ViewColumn.Three)));
+				context.subscriptions.push(commands.registerCommand(Commands.OPEN_OUTPUT, () => languageClient.outputChannel.show(ViewColumn.Three)));
 
 				context.subscriptions.push(commands.registerCommand(Commands.OPEN_SERVER_LOG, (column: ViewColumn) => openServerLogFile(workspacePath, column)));
 
